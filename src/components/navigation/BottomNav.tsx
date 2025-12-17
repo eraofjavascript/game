@@ -24,7 +24,7 @@ const BottomNav = ({ activeTab, onTabChange }: BottomNavProps) => {
       initial={{ y: 100 }}
       animate={{ y: 0 }}
       transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50"
+      className="fixed bottom-4 left-0 right-0 z-50 flex justify-center px-4"
     >
       <div className="flex items-center gap-2 p-2 rounded-2xl bg-card/90 backdrop-blur-xl border border-border shadow-2xl">
         {tabs.map((tab) => {
