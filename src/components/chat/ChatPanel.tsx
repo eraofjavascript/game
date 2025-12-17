@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
-import { Send, Users, MessageSquare, ArrowLeft } from 'lucide-react';
+import { Send, Users, MessageSquare, ArrowLeft, Bell, BellOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/hooks/useNotifications';
+import { useToast } from '@/hooks/use-toast';
 
 interface Message {
   id: string;
@@ -15,6 +17,7 @@ interface Message {
   receiver_id: string | null;
   is_group_message: boolean;
   created_at: string;
+  message_type: 'user' | 'system';
   profiles: { username: string };
 }
 
@@ -31,6 +34,8 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
   const [showChatList, setShowChatList] = useState(true);
   const { user, profile } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { permission, isSupported, requestPermission, sendNotification } = useNotifications();
+  const { toast } = useToast();
 
   const fetchMembers = useCallback(async () => {
     if (!user) return;
@@ -68,19 +73,37 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
       const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
       const messagesWithProfiles = data.map(m => ({
         ...m,
+        message_type: (m as any).message_type || 'user',
         profiles: profileMap.get(m.sender_id) || { username: 'Unknown' }
       }));
       setMessages(messagesWithProfiles as Message[]);
     }
   }, [user, activeChat]);
 
+  // Request notification permission on mount
+  useEffect(() => {
+    if (isSupported && permission === 'default') {
+      // Show toast prompting for notifications
+      toast({
+        title: "Enable Notifications",
+        description: "Get notified when you receive new messages",
+        action: (
+          <Button size="sm" onClick={requestPermission}>
+            Enable
+          </Button>
+        ),
+      });
+    }
+  }, [isSupported, permission]);
+
   useEffect(() => {
     if (!user) return;
     fetchMembers();
     fetchMessages();
 
-    const channel = supabase
-      .channel('chat-messages')
+    // Subscribe to new messages
+    const messagesChannel = supabase
+      .channel('chat-messages-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
         const newMsg = payload.new as any;
         if (
@@ -89,14 +112,32 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
           newMsg.receiver_id === user.id
         ) {
           fetchMessages();
+          
+          // Send notification if message is from someone else
+          if (newMsg.sender_id !== user.id && permission === 'granted') {
+            const senderName = members.find(m => m.id === newMsg.sender_id)?.username || 'Someone';
+            sendNotification('New Message', {
+              body: newMsg.message_type === 'system' ? newMsg.content : `${senderName}: ${newMsg.content}`,
+              tag: 'chat-message',
+            });
+          }
         }
       })
       .subscribe();
 
+    // Subscribe to new members
+    const profilesChannel = supabase
+      .channel('profiles-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
+        fetchMembers();
+      })
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(messagesChannel);
+      supabase.removeChannel(profilesChannel);
     };
-  }, [user, activeChat, fetchMembers, fetchMessages]);
+  }, [user, activeChat, fetchMembers, fetchMessages, permission, sendNotification, members]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -105,14 +146,28 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
   const sendMessage = async () => {
     if (!newMessage.trim() || !user) return;
 
-    await supabase.from('chat_messages').insert({
+    // Optimistic update
+    const optimisticMessage: Message = {
+      id: 'temp-' + Date.now(),
       content: newMessage.trim(),
       sender_id: user.id,
       receiver_id: activeChat === 'group' ? null : activeChat,
       is_group_message: activeChat === 'group',
-    });
-
+      created_at: new Date().toISOString(),
+      message_type: 'user',
+      profiles: { username: profile?.username || 'You' }
+    };
+    
+    setMessages(prev => [...prev, optimisticMessage]);
     setNewMessage('');
+
+    await supabase.from('chat_messages').insert({
+      content: optimisticMessage.content,
+      sender_id: user.id,
+      receiver_id: activeChat === 'group' ? null : activeChat,
+      is_group_message: activeChat === 'group',
+      message_type: 'user',
+    });
   };
 
   const openChat = (chatId: 'group' | string) => {
@@ -122,6 +177,23 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
 
   const goBackToList = () => {
     setShowChatList(true);
+  };
+
+  const toggleNotifications = async () => {
+    if (permission === 'granted') {
+      toast({
+        title: "Notifications",
+        description: "To disable notifications, please use your browser settings",
+      });
+    } else {
+      const granted = await requestPermission();
+      if (granted) {
+        toast({
+          title: "Notifications Enabled",
+          description: "You'll now receive message notifications",
+        });
+      }
+    }
   };
 
   const activeMember = members.find((m) => m.id === activeChat);
@@ -147,7 +219,15 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
               <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
                 <MessageSquare className="w-5 h-5 text-primary" />
               </div>
-              <h2 className="text-xl font-display font-bold text-foreground">Chats</h2>
+              <h2 className="text-xl font-display font-bold text-foreground flex-1">Chats</h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleNotifications}
+                className={permission === 'granted' ? 'text-primary' : 'text-muted-foreground'}
+              >
+                {permission === 'granted' ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+              </Button>
             </div>
 
             {/* Chat List */}
@@ -214,7 +294,7 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
                   </Avatar>
                 )}
               </div>
-              <div>
+              <div className="flex-1">
                 <h3 className="font-display font-semibold text-foreground">
                   {activeChat === 'group' ? 'Group Chat' : activeMember?.username}
                 </h3>
@@ -222,12 +302,37 @@ const ChatPanel = ({ isFullScreen = false, onBack }: ChatPanelProps) => {
                   {activeChat === 'group' ? `${members.length + 1} members` : 'Direct Message'}
                 </p>
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleNotifications}
+                className={permission === 'granted' ? 'text-primary' : 'text-muted-foreground'}
+              >
+                {permission === 'granted' ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+              </Button>
             </div>
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {messages.map((msg) => {
                 const isOwn = msg.sender_id === user?.id;
+                const isSystem = msg.message_type === 'system';
+                
+                if (isSystem) {
+                  return (
+                    <motion.div
+                      key={msg.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex justify-center"
+                    >
+                      <div className="px-4 py-2 rounded-full bg-secondary/50 text-muted-foreground text-sm">
+                        {msg.content}
+                      </div>
+                    </motion.div>
+                  );
+                }
+                
                 return (
                   <motion.div
                     key={msg.id}
