@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { LogOut, User, Shield, Users } from 'lucide-react';
+import { LogOut, User, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,23 +24,12 @@ const ProfilePanel = () => {
           {profile?.username || 'User'}
         </h2>
 
-        <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium mb-6 ${
-          isAdmin 
-            ? 'bg-primary/20 text-primary' 
-            : 'bg-accent/20 text-accent'
-        }`}>
-          {isAdmin ? (
-            <>
-              <Shield className="w-4 h-4" />
-              Admin
-            </>
-          ) : (
-            <>
-              <Users className="w-4 h-4" />
-              Member
-            </>
-          )}
-        </div>
+        {isAdmin && (
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-medium mb-6">
+            <Shield className="w-4 h-4" />
+            Admin
+          </div>
+        )}
 
         <div className="space-y-4 mt-6">
           <div className="p-4 rounded-xl bg-secondary/50 flex items-center gap-3">

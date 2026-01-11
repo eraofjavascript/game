@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,60 +16,28 @@ const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // If there is a stale/broken session in storage, it can cause repeated "Failed to fetch"
-  // refresh attempts and make login look like "wrong credentials".
-  useEffect(() => {
-    supabase.auth.signOut({ scope: 'local' }).catch(() => {
-      // ignore
-    });
-  }, []);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    try {
-      // Clear any stale session before signing in
-      await supabase.auth.signOut({ scope: 'local' });
+    // Convert username to email format for Supabase auth
+    const email = `${username.toLowerCase().trim()}@matchschedule.local`;
+    const { error } = await signIn(email, password);
 
-      const normalized = username.toLowerCase().trim();
-      const emails = normalized.includes('@')
-        ? [normalized]
-        : [`${normalized}@matchschedule.local`, `${normalized}@gamezone.com`];
-
-      let lastError: Error | null = null;
-
-      for (const email of emails) {
-        const { error } = await signIn(email, password);
-        if (!error) {
-          toast({
-            title: "Welcome back!",
-            description: "Successfully logged in",
-          });
-          navigate('/');
-          setIsLoading(false);
-          return;
-        }
-        lastError = error;
-      }
-
+    if (error) {
       toast({
         title: "Login Failed",
         description: "Invalid username or password",
         variant: "destructive",
       });
-
-      console.debug('Login error:', lastError);
-    } catch (err) {
-      console.error('Auth network error:', err);
+    } else {
       toast({
-        title: 'Connection error',
-        description: 'Cannot reach the backend right now. Please refresh and try again.',
-        variant: 'destructive',
+        title: "Welcome back!",
+        description: "Successfully logged in",
       });
-    } finally {
-      setIsLoading(false);
+      navigate('/');
     }
+    setIsLoading(false);
   };
 
   return (
