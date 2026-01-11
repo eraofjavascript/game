@@ -20,23 +20,36 @@ const Auth = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Convert username to email format for Supabase auth
-    const email = `${username.toLowerCase().trim()}@matchschedule.local`;
-    const { error } = await signIn(email, password);
+    const normalized = username.toLowerCase().trim();
+    const emails = normalized.includes('@')
+      ? [normalized]
+      : [`${normalized}@matchschedule.local`, `${normalized}@gamezone.com`];
 
-    if (error) {
-      toast({
-        title: "Login Failed",
-        description: "Invalid username or password",
-        variant: "destructive",
-      });
-    } else {
-      toast({
-        title: "Welcome back!",
-        description: "Successfully logged in",
-      });
-      navigate('/');
+    let lastError: Error | null = null;
+
+    for (const email of emails) {
+      const { error } = await signIn(email, password);
+      if (!error) {
+        toast({
+          title: "Welcome back!",
+          description: "Successfully logged in",
+        });
+        navigate('/');
+        setIsLoading(false);
+        return;
+      }
+      lastError = error;
     }
+
+    toast({
+      title: "Login Failed",
+      description: "Invalid username or password",
+      variant: "destructive",
+    });
+
+    // Keep lastError available for debugging without exposing it in UI
+    console.debug('Login error:', lastError);
+
     setIsLoading(false);
   };
 
