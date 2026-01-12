@@ -20,17 +20,9 @@ const Auth = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    const normalizedUsername = username.toLowerCase().trim();
-
-    // Username-only login: try current domain first, then legacy domain (for older admin accounts)
-    const primaryEmail = `${normalizedUsername}@matchschedule.local`;
-    const legacyEmail = `${normalizedUsername}@gamezone.com`;
-
-    let { error } = await signIn(primaryEmail, password);
-    if (error) {
-      const retry = await signIn(legacyEmail, password);
-      error = retry.error;
-    }
+    // Convert username to email format for Supabase auth
+    const email = `${username.toLowerCase().trim()}@matchschedule.local`;
+    const { error } = await signIn(email, password);
 
     if (error) {
       toast({
